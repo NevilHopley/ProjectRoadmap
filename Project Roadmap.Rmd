@@ -1,0 +1,152 @@
+```{r}
+library(dplyr)
+library(ggplot2)
+library(gganimate)
+library(gifski) # needed for gif generation
+library(readxl) # to read in xlsx sheet of stage text
+library(purrr) # for map command
+```
+
+```{r load in stages text}
+
+df_stages = read_xlsx(path = "Project Stages.xlsx")
+
+```
+
+
+```{r}
+road <- function(t = NULL,
+                 side = NULL){
+  adjust = case_when(
+    side == "left" ~ c(-0.3, 0.02), # in order (x_shift, y_shift)
+    side == "centre" ~ c(0, 0),
+    side == "right" ~ c(+0.3, -0.02)
+  )
+  return (c(exp(-0.2 * t) * sin(7 * t) + 2 * t + 1, 1.5 * log(t) + 1) + adjust)
+}
+
+```
+
+```{r parametric equation of road}
+t_min = 0.5
+t_max = 2.7
+resolution = 400
+
+df_road = tibble(point = c(0:resolution),
+                 t = t_min + point * (t_max - t_min) / resolution) |> 
+  rowwise() |> 
+  mutate(
+    left_x = road(t,
+                  side = "left")[1],
+    left_y = road(t,
+                  side = "left")[2],
+    centre_x = road(t,
+                    side = "centre")[1],
+    centre_y = road(t,
+                    side = "centre")[2],
+    right_x = road(t,
+                   side = "right")[1],
+    right_y = road(t,
+                   side = "right")[2])
+
+```
+
+```{r}
+
+label_steps = 50
+stage_gap = 18 # gap between successive stage text being shown
+marker_y_shift = 0.15
+
+df_label_n <- function(x){
+  
+  df_temp = tibble(point_label = c(0:label_steps),
+                   t = t_min + (label_steps - point_label) * (t_max - t_min) / label_steps) |> 
+    rowwise() |> 
+    mutate(
+      x_marker = road(t, side = "centre")[1],
+      y_marker = road(t, side = "centre")[2] + marker_y_shift, 
+      label_text = df_stages$stage_text[x],
+      clock_tick = point_label + (x - 1) * stage_gap)
+  
+  return(df_temp)
+}
+
+df_label = bind_rows(df_label_n(1),
+                     df_label_n(2),
+                     df_label_n(3))
+
+df_label = purrr::map(.x = c(1:nrow(df_stages)),
+                       .f = \(x) df_label_n(x)) |> 
+  bind_rows()
+
+```
+
+
+```{r}
+animated_plot <- ggplot(data = df_road) +
+  geom_segment(mapping = aes(x = left_x,
+                             y = left_y,
+                             xend = right_x,
+                             yend = right_y),
+               linewidth = 1,
+               lineend = "round") +
+  # coord_cartesian(xlim = c(0, 6),
+  #                 ylim = c(0, 3)) +
+  geom_path(mapping = aes(x = left_x,
+                          y = left_y),
+            linetype = 1,
+            linewidth = 2) +
+  geom_path(mapping = aes(x = right_x,
+                          y = right_y),
+            linetype = 1,
+            linewidth = 2) +
+  geom_path(mapping = aes(x = centre_x,
+                          y = centre_y),
+            linetype = 2,
+            colour = "white") +
+  geom_point(data = df_label,
+             mapping = aes(x = x_marker,
+                           y = y_marker),
+             shape = 25, # red downwards triangle
+             fill = "red",
+             colour = "red",
+             size = 8)+
+  geom_point(data = df_label,
+             mapping = aes(x = x_marker,
+                           y = y_marker + 0.1),
+             shape = 19, # big red circle
+             fill = "red",
+             colour = "red",
+             size = 12) +
+  geom_point(data = df_label,
+             mapping = aes(x = x_marker,
+                           y = y_marker + 0.1),
+             shape = 19, # less big white circle
+             fill = "white",
+             colour = "white",
+             size = 9) +
+  geom_label(data = df_label,
+             mapping = aes(x = x_marker,
+                           y = y_marker + 0.1,
+                           label = label_text), # label next to marker
+             nudge_x = -0.4, # position just to the left of the marker
+             nudge_y = 0.0,
+             hjust = 1, # right align
+             family = "sans",
+             size = 8) +
+  theme_void() +
+  transition_states(states = clock_tick,
+                    transition_length = 1,
+                    state_length = 1)
+
+animate(plot = animated_plot,
+        nframes = 400,
+        fps = 10,
+        renderer = gifski_renderer(loop = FALSE))
+
+anim_save(filename = "Project Roadmap.gif",
+          animation = last_animation(),
+          path = "output")
+
+```
+
